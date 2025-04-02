@@ -9,7 +9,7 @@ from torchvision.datasets import ImageFolder
 from torch.utils.data import DataLoader
 from model import load_base_model
 from utils import (
-    EMOTIONS, detect_face, preprocess_face, preprocess_transform,
+    EMOTIONS, detect_face, preprocess_face, dataset_preprocess_transform,
     CALIBRATION_DATA_DIR, BASE_MODEL_PATH, PERSONALIZED_MODEL_PATH, get_device
 )
 
@@ -105,57 +105,74 @@ def fine_tune_model():
 
     # 1. Load Base Model
     model = load_base_model(path=BASE_MODEL_PATH, device=device)
-    if model is None: return # Error handled in load_base_model
+    if model is None: return
 
     # 2. Prepare Dataset and DataLoader
     if not os.path.exists(CALIBRATION_DATA_DIR):
         print(f"Error: Calibration directory '{CALIBRATION_DATA_DIR}' not found.")
         return
 
-    # Use ImageFolder - requires images to be in CALIBRATION_DATA_DIR/emotion_name/image.png
-    # Apply the same preprocessing used for inference
-    calibration_dataset = ImageFolder(CALIBRATION_DATA_DIR, transform=preprocess_transform)
+    # Use ImageFolder WITH the dataset_preprocess_transform
+    print(f"[INFO] Loading calibration data from: {CALIBRATION_DATA_DIR}")
+    try:
+        # ***** CHANGE HERE *****
+        calibration_dataset = ImageFolder(CALIBRATION_DATA_DIR, transform=dataset_preprocess_transform)
+        # ***********************
+    except Exception as e:
+        print(f"[ERROR] Failed to load calibration dataset: {e}")
+        return
+
 
     if len(calibration_dataset) == 0:
         print("Error: No calibration images found. Please run calibration first.")
         return
 
-    # Check if all classes are present (optional but good practice)
+    # Check if all classes are present
     if len(calibration_dataset.classes) != len(EMOTIONS):
          print(f"Warning: Found {len(calibration_dataset.classes)} classes, expected {len(EMOTIONS)}. Ensure all emotion folders have images.")
-         # Ensure class_to_idx matches EMOTIONS order if necessary - ImageFolder sorts alphabetically
          print(f"Classes found by ImageFolder: {calibration_dataset.classes}")
-         # Potentially remap indices if order doesn't match EMOTIONS, but ImageFolder is usually consistent if folders are named correctly.
 
-
-    calibration_loader = DataLoader(calibration_dataset, batch_size=8, shuffle=True) # Small batch size for fine-tuning
+    print(f"[INFO] Calibration dataset loaded: {len(calibration_dataset)} samples found.")
+    calibration_loader = DataLoader(calibration_dataset, batch_size=8, shuffle=True, num_workers=2, pin_memory=True) # Small batch size, adjust num_workers if needed
 
     # 3. Define Optimizer and Loss Function
-    # Fine-tune only the last few layers or the whole model with a small LR
     optimizer = optim.Adam(model.parameters(), lr=FINETUNE_LR)
     criterion = nn.CrossEntropyLoss()
 
     # 4. Fine-tuning Loop
-    model.train() # Set model to training mode
+    model.train()
     print(f"Fine-tuning for {FINETUNE_EPOCHS} epochs...")
     for epoch in range(FINETUNE_EPOCHS):
         running_loss = 0.0
         images_processed = 0
-        for i, data in enumerate(calibration_loader, 0):
-            inputs, labels = data
-            inputs, labels = inputs.to(device), labels.to(device)
+        epoch_start_time = time.time()
+        for i, data in enumerate(calibration_loader, 0): # <--- Error occurred around here
+            try:
+                inputs, labels = data
+                inputs, labels = inputs.to(device), labels.to(device)
 
-            optimizer.zero_grad()
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
+                optimizer.zero_grad()
+                outputs = model(inputs)
+                loss = criterion(outputs, labels)
+                loss.backward()
+                optimizer.step()
 
-            running_loss += loss.item() * inputs.size(0)
-            images_processed += inputs.size(0)
+                running_loss += loss.item() * inputs.size(0)
+                images_processed += inputs.size(0)
+            except Exception as batch_error:
+                print(f"[ERROR] Error during batch {i} processing in epoch {epoch+1}: {batch_error}")
+                # Decide if you want to continue or stop
+                # continue # Skip this batch
+                return # Stop fine-tuning on error
 
-        epoch_loss = running_loss / images_processed
-        print(f"Epoch [{epoch+1}/{FINETUNE_EPOCHS}], Loss: {epoch_loss:.4f}")
+        # Ensure images_processed is not zero before division
+        if images_processed > 0:
+             epoch_loss = running_loss / images_processed
+             epoch_time = time.time() - epoch_start_time
+             print(f"Epoch [{epoch+1}/{FINETUNE_EPOCHS}], Loss: {epoch_loss:.4f}, Time: {epoch_time:.2f}s")
+        else:
+             print(f"Epoch [{epoch+1}/{FINETUNE_EPOCHS}] - No images processed.")
+
 
     # 5. Save the Fine-tuned Model
     try:

@@ -4,13 +4,6 @@ from calibration import collect_calibration_data, fine_tune_model
 from detection import run_detection
 from utils import CALIBRATION_DATA_DIR, PERSONALIZED_MODEL_PATH, BASE_MODEL_PATH
 
-# --- You MUST have these files ---
-# 1. Download 'haarcascade_frontalface_default.xml' from OpenCV's GitHub repo:
-#    https://github.com/opencv/opencv/blob/master/data/haarcascades/haarcascade_frontalface_default.xml
-# 2. Obtain or create a 'base_model.pth' file. This should contain the weights
-#    of your CNN (like the SimpleCNN in model.py or a ResNet/VGG) pre-trained
-#    on a dataset like FER-2013. Without this, the base performance will be random.
-# ---
 
 def main():
     parser = argparse.ArgumentParser(description="Real-time Personalized Emotion Recognizer")
@@ -32,7 +25,7 @@ def main():
         # Step 2: Fine-tune only if data collection was successful and not aborted
         if success:
             # Check if enough data was collected (basic check)
-            if os.path.exists(CALIBRATION_DATA_DIR) and len(os.listdir(CALIBRATION_DATA_DIR)) > 0 :
+            if os.path.exists(CALIBRATION_DATA_DIR) and len(os.listdir(CALIBRATION_DATA_DIR)) > 0:
                  fine_tune_model()
             else:
                  print("Calibration data directory is empty or missing. Fine-tuning skipped.")
